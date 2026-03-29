@@ -15,6 +15,11 @@ class BondData(BaseModel):
     mkt_value: float = Field(description="Market value for benchmark weighting")
     maturity_bucket: str = Field(default="3-5y")
     cds_spread: Optional[float] = Field(default=None, description="CDS spread in bp")
+    ytm: Optional[float] = Field(default=None, description="Yield to maturity in %")
+    coupon_rate: Optional[float] = Field(default=None, description="Coupon rate in %")
+    maturity_date: Optional[str] = Field(default=None, description="Maturity date (YYYY-MM-DD)")
+    face_value: Optional[float] = Field(default=None, description="Face/par value")
+    market_price: Optional[float] = Field(default=None, description="Current market price")
 
 
 class ViewInput(BaseModel):
@@ -106,3 +111,30 @@ class OptimisationResponse(BaseModel):
     constraint_status: list[ConstraintStatus]
     var_distribution: list[float] = Field(default=[], description="Loss distribution percentiles")
     warnings: list[str] = []
+
+
+class ParsedBond(BaseModel):
+    """Bond data as parsed from an uploaded file, ready for the frontend."""
+    id: str
+    issuer: str
+    sector: str
+    rating: str
+    oas: float
+    spread_duration: float
+    pd_annual: float
+    lgd: float = 0.4
+    mkt_value: float
+    maturity_bucket: str = "3-5y"
+    ytm: Optional[float] = None
+    coupon_rate: Optional[float] = None
+    maturity_date: Optional[str] = None
+    face_value: Optional[float] = None
+    market_price: Optional[float] = None
+
+
+class UploadResponse(BaseModel):
+    status: str
+    bonds: list[ParsedBond]
+    row_count: int
+    warnings: list[str] = []
+    errors: list[str] = []

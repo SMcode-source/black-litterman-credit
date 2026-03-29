@@ -6,3 +6,5 @@ pandas==2.2.3
 cvxpy==1.6.0
 pydantic==2.10.3
 gunicorn==23.0.0
+openpyxl==3.1.5
+python-multipart==0.0.20

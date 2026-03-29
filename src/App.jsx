@@ -6,7 +6,7 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   LineChart, Line, ReferenceLine
 } from "recharts";
-import { Settings, TrendingUp, Eye, BarChart3, AlertTriangle, Play, Plus, Trash2, Info, ChevronDown, ChevronUp, RefreshCw, Server, Cpu, Loader2 } from "lucide-react";
+import { Settings, TrendingUp, Eye, BarChart3, AlertTriangle, Play, Plus, Trash2, Info, ChevronDown, ChevronUp, RefreshCw, Server, Cpu, Loader2, Upload, FileSpreadsheet, X, RotateCcw } from "lucide-react";
 
 // ═══════════════════════════════════════════════════════════════════
 // API CONFIGURATION
@@ -290,6 +290,9 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [engineMode, setEngineMode] = useState(API_URL ? "python" : "browser");
   const [backendWarnings, setBackendWarnings] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMode, setUploadMode] = useState("replace"); // "replace" or "append"
+  const [uploadResult, setUploadResult] = useState(null);
 
   const covMatrix = useMemo(() => generateCovarianceMatrix(bonds), [bonds]);
 
@@ -345,6 +348,55 @@ export default function App() {
     setTab("results");
   }, [bonds, views, params, engineMode, runLocalOptimisation]);
 
+  const handleFileUpload = useCallback(async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${API_URL}/api/v1/upload-bonds`, { method: "POST", body: formData });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        throw new Error(err.detail || `Upload failed: ${res.status}`);
+      }
+      const data = await res.json();
+      setUploadResult(data);
+      if (data.status === "success" && data.bonds.length > 0) {
+        const newBonds = data.bonds.map(b => ({
+          id: b.id, issuer: b.issuer, sector: b.sector, rating: b.rating,
+          oas: b.oas, spreadDur: b.spread_duration, pd: b.pd_annual,
+          lgd: b.lgd, mktValue: b.mkt_value, matBucket: b.maturity_bucket,
+          ytm: b.ytm, couponRate: b.coupon_rate, maturityDate: b.maturity_date,
+          faceValue: b.face_value, marketPrice: b.market_price,
+        }));
+        if (uploadMode === "replace") {
+          setBonds(newBonds);
+        } else {
+          const existingIds = new Set(bonds.map(b => b.id));
+          const unique = newBonds.filter(b => !existingIds.has(b.id));
+          const dupes = newBonds.length - unique.length;
+          if (dupes > 0) {
+            setUploadResult(prev => ({ ...prev, warnings: [...(prev?.warnings || []), `${dupes} duplicate ID(s) skipped during append.`] }));
+          }
+          setBonds(prev => [...prev, ...unique]);
+        }
+        setResults(null); // clear stale results
+      }
+    } catch (err) {
+      setUploadResult({ status: "error", bonds: [], row_count: 0, warnings: [], errors: [err.message] });
+    }
+    setUploading(false);
+    e.target.value = ""; // reset file input
+  }, [uploadMode, bonds]);
+
+  const resetToSampleBonds = useCallback(() => {
+    setBonds(SAMPLE_BONDS);
+    setResults(null);
+    setUploadResult(null);
+  }, []);
+
   const addView = () => setViews([...views, { type: "ABSOLUTE", longAssets: [bonds[0].id], shortAssets: [], magnitude: 50, confidence: 0.5 }]);
   const removeView = (i) => setViews(views.filter((_, j) => j !== i));
   const updateView = (i, field, val) => { const v = [...views]; v[i] = { ...v[i], [field]: val }; setViews(v); };
@@ -362,6 +414,81 @@ export default function App() {
           <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full font-medium">Avg SD: {(bonds.reduce((s, b) => s + b.spreadDur, 0) / bonds.length).toFixed(1)}y</span>
         </div>
       </div>
+
+      {/* ── File Upload Section ── */}
+      {API_URL && (
+        <div className="mb-4 border border-dashed border-gray-300 rounded-xl p-4 bg-gray-50/50">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet size={18} className="text-blue-600" />
+              <span className="text-sm font-semibold text-gray-700">Upload Bond Universe</span>
+              <span className="text-xs text-gray-400">CSV, TXT, or Excel</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center bg-white border border-gray-200 rounded-lg overflow-hidden text-xs">
+                <button onClick={() => setUploadMode("replace")}
+                  className={`px-3 py-1.5 font-medium transition-colors ${uploadMode === "replace" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}>
+                  Replace
+                </button>
+                <button onClick={() => setUploadMode("append")}
+                  className={`px-3 py-1.5 font-medium transition-colors ${uploadMode === "append" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}>
+                  Append
+                </button>
+              </div>
+              {bonds !== SAMPLE_BONDS && (
+                <button onClick={resetToSampleBonds}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-white transition-colors">
+                  <RotateCcw size={12} /> Reset to sample
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${uploading ? "border-blue-300 bg-blue-50" : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/50"}`}>
+              {uploading ? <Loader2 size={16} className="animate-spin text-blue-600" /> : <Upload size={16} className="text-gray-400" />}
+              <span className="text-sm text-gray-600">{uploading ? "Parsing file..." : "Choose file or drag & drop"}</span>
+              <input type="file" accept=".csv,.txt,.xlsx,.xls" onChange={handleFileUpload} className="hidden" disabled={uploading} />
+            </label>
+          </div>
+          <div className="mt-2 text-xs text-gray-400">
+            <span className="font-medium">Required:</span> id/issuer. <span className="font-medium">Optional:</span> coupon_rate, maturity_date, face_value, price, yield/ytm, oas, spread_duration, rating, sector, pd, lgd, mkt_value.
+            Missing yield is calculated from coupon + price + maturity. Missing OAS/spread_duration are estimated.
+          </div>
+
+          {/* Upload feedback */}
+          {uploadResult && (
+            <div className={`mt-3 p-3 rounded-lg text-sm ${uploadResult.status === "success" ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}>
+              <div className="flex items-center justify-between">
+                <span className={`font-medium ${uploadResult.status === "success" ? "text-green-700" : "text-red-700"}`}>
+                  {uploadResult.status === "success"
+                    ? `${uploadResult.row_count} bond(s) loaded successfully (${uploadMode === "replace" ? "replaced" : "appended"})`
+                    : "Upload failed"}
+                </span>
+                <button onClick={() => setUploadResult(null)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+              </div>
+              {uploadResult.errors?.length > 0 && (
+                <div className="mt-2 space-y-0.5">
+                  {uploadResult.errors.slice(0, 5).map((e, i) => (
+                    <div key={i} className="text-xs text-red-600">{e}</div>
+                  ))}
+                  {uploadResult.errors.length > 5 && <div className="text-xs text-red-500">...and {uploadResult.errors.length - 5} more</div>}
+                </div>
+              )}
+              {uploadResult.warnings?.length > 0 && (
+                <details className="mt-2">
+                  <summary className="text-xs text-amber-600 cursor-pointer font-medium">{uploadResult.warnings.length} warning(s)</summary>
+                  <div className="mt-1 space-y-0.5 max-h-32 overflow-y-auto">
+                    {uploadResult.warnings.map((w, i) => (
+                      <div key={i} className="text-xs text-amber-600">{w}</div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-xl border border-gray-200">
         <table className="w-full text-sm">
           <thead>
@@ -373,6 +500,8 @@ export default function App() {
               <th className="px-3 py-2.5 font-medium text-gray-600 text-right">OAS (bp)</th>
               <th className="px-3 py-2.5 font-medium text-gray-600 text-right">Spd Dur</th>
               <th className="px-3 py-2.5 font-medium text-gray-600 text-right">PD (bp)</th>
+              {bonds.some(b => b.ytm != null) && <th className="px-3 py-2.5 font-medium text-gray-600 text-right">YTM%</th>}
+              {bonds.some(b => b.couponRate != null) && <th className="px-3 py-2.5 font-medium text-gray-600 text-right">Coupon%</th>}
               <th className="px-3 py-2.5 font-medium text-gray-600 text-right">Bmk Wt%</th>
               {results && <th className="px-3 py-2.5 font-medium text-blue-700 text-right">Opt Wt%</th>}
               {results && <th className="px-3 py-2.5 font-medium text-blue-700 text-right">Active%</th>}
@@ -393,6 +522,8 @@ export default function App() {
                   <td className="px-3 py-2 text-right font-mono">{b.oas}</td>
                   <td className="px-3 py-2 text-right font-mono">{b.spreadDur.toFixed(1)}</td>
                   <td className="px-3 py-2 text-right font-mono">{(b.pd * 10000).toFixed(1)}</td>
+                  {bonds.some(x => x.ytm != null) && <td className="px-3 py-2 text-right font-mono">{b.ytm != null ? b.ytm.toFixed(2) : "—"}</td>}
+                  {bonds.some(x => x.couponRate != null) && <td className="px-3 py-2 text-right font-mono">{b.couponRate != null ? b.couponRate.toFixed(2) : "—"}</td>}
                   <td className="px-3 py-2 text-right font-mono">{bmkW.toFixed(2)}</td>
                   {results && <td className="px-3 py-2 text-right font-mono font-semibold text-blue-700">{optW.toFixed(2)}</td>}
                   {results && <td className={`px-3 py-2 text-right font-mono font-semibold ${active > 0.01 ? "text-green-600" : active < -0.01 ? "text-red-500" : "text-gray-400"}`}>{active > 0 ? "+" : ""}{active.toFixed(2)}</td>}
