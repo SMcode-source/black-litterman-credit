@@ -6,7 +6,42 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   LineChart, Line, ReferenceLine
 } from "recharts";
-import { Settings, TrendingUp, Eye, BarChart3, AlertTriangle, Play, Plus, Trash2, Info, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
+import { Settings, TrendingUp, Eye, BarChart3, AlertTriangle, Play, Plus, Trash2, Info, ChevronDown, ChevronUp, RefreshCw, Server, Cpu, Loader2 } from "lucide-react";
+
+// ═══════════════════════════════════════════════════════════════════
+// API CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════
+const API_URL = import.meta.env.VITE_API_URL || "";
+
+async function callBackendOptimise(bonds, views, params) {
+  const payload = {
+    bonds: bonds.map(b => ({
+      id: b.id, issuer: b.issuer, sector: b.sector, rating: b.rating,
+      oas: b.oas, spread_duration: b.spreadDur, pd_annual: b.pd,
+      lgd: b.lgd, mkt_value: b.mktValue, maturity_bucket: b.matBucket,
+    })),
+    views: views.map(v => ({
+      view_type: v.type, long_assets: v.longAssets, short_assets: v.shortAssets,
+      magnitude_bp: v.magnitude, confidence: v.confidence,
+    })),
+    constraints: {
+      max_issuer_weight: params.maxIssuerWeight,
+      min_position_size: params.minPositionSize,
+      max_tracking_error: 150, max_sector_overweight: 10,
+      spread_duration_tolerance: 0.25,
+    },
+    delta: params.delta, tau: params.tau,
+    n_simulations: 50000,
+    covariance_method: "factor_model",
+  };
+  const res = await fetch(`${API_URL}/api/v1/optimise`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 // SAMPLE IG BOND UNIVERSE
@@ -250,26 +285,69 @@ export default function App() {
     { type: "ABSOLUTE", longAssets: ["F"], shortAssets: [], magnitude: 80, confidence: 0.4 },
   ]);
   const [params, setParams] = useState({ delta: 2.5, tau: 0.025, maxIssuerWeight: 8, minPositionSize: 0.2 });
-  const [hasRun, setHasRun] = useState(false);
+  const [results, setResults] = useState(null);
   const [showParams, setShowParams] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [engineMode, setEngineMode] = useState(API_URL ? "python" : "browser");
+  const [backendWarnings, setBackendWarnings] = useState([]);
 
   const covMatrix = useMemo(() => generateCovarianceMatrix(bonds), [bonds]);
 
-  const results = useMemo(() => {
-    if (!hasRun) return null;
+  const runLocalOptimisation = useCallback(() => {
     const { wMkt, pi } = computeEquilibrium(bonds, covMatrix, params.delta);
     const viewData = buildViewMatrices(views, bonds, covMatrix, params.tau);
     const { muBL, sigmaBL } = computePosterior(pi, covMatrix, params.tau, viewData);
     const w = optimisePortfolio(muBL, sigmaBL, params.delta, bonds, params);
     const risk = computeRiskMetrics(w, bonds, covMatrix, muBL);
-    return { wMkt, pi, muBL, sigmaBL, w, risk };
-  }, [hasRun, bonds, covMatrix, views, params]);
+    return { wMkt, pi, muBL, sigmaBL, w, risk, solverStatus: "js_gradient_projection" };
+  }, [bonds, covMatrix, views, params]);
+
+  const runOptimisation = useCallback(async () => {
+    setLoading(true);
+    setBackendWarnings([]);
+    try {
+      if (engineMode === "python" && API_URL) {
+        const apiResult = await callBackendOptimise(bonds, views, params);
+        // Transform API response to match frontend format
+        const totalMV = bonds.reduce((s, b) => s + b.mktValue, 0);
+        const wMkt = bonds.map(b => b.mktValue / totalMV);
+        const w = apiResult.issuer_results.map(r => r.optimal_weight / 100);
+        const pi = apiResult.issuer_results.map(r => r.equilibrium_return_bp / 10000);
+        const muBL = apiResult.issuer_results.map(r => r.posterior_return_bp / 10000);
+        const risk = {
+          portReturn: apiResult.risk_metrics.portfolio_return_bp,
+          portVol: apiResult.risk_metrics.portfolio_vol_bp,
+          sharpe: apiResult.risk_metrics.sharpe_ratio,
+          te: apiResult.risk_metrics.tracking_error_bp,
+          ir: apiResult.risk_metrics.information_ratio,
+          el: apiResult.risk_metrics.expected_loss_bp,
+          portSpreadDur: apiResult.risk_metrics.spread_duration,
+          dts: apiResult.risk_metrics.dts,
+          creditVaR: apiResult.risk_metrics.credit_var_99_bp,
+          creditCVaR: apiResult.risk_metrics.credit_cvar_99_bp,
+          sectorWeights: {}, sectorBmkWeights: {}, ratingWeights: {}, ratingBmkWeights: {},
+          activeW: w.map((wi, i) => wi - wMkt[i]), wBmk: wMkt,
+        };
+        apiResult.sector_allocation.forEach(s => { risk.sectorWeights[s.sector] = s.optimal / 100; risk.sectorBmkWeights[s.sector] = s.benchmark / 100; });
+        apiResult.rating_allocation.forEach(r => { risk.ratingWeights[r.rating_bucket] = r.optimal / 100; risk.ratingBmkWeights[r.rating_bucket] = r.benchmark / 100; });
+        setBackendWarnings(apiResult.warnings || []);
+        setResults({ wMkt, pi, muBL, w, risk, solverStatus: apiResult.solver_status, varDistribution: apiResult.var_distribution });
+      } else {
+        setResults(runLocalOptimisation());
+      }
+    } catch (err) {
+      console.warn("Backend call failed, falling back to browser engine:", err.message);
+      setBackendWarnings([`Backend unavailable (${err.message}). Using browser-based engine.`]);
+      setEngineMode("browser");
+      setResults(runLocalOptimisation());
+    }
+    setLoading(false);
+    setTab("results");
+  }, [bonds, views, params, engineMode, runLocalOptimisation]);
 
   const addView = () => setViews([...views, { type: "ABSOLUTE", longAssets: [bonds[0].id], shortAssets: [], magnitude: 50, confidence: 0.5 }]);
   const removeView = (i) => setViews(views.filter((_, j) => j !== i));
   const updateView = (i, field, val) => { const v = [...views]; v[i] = { ...v[i], [field]: val }; setViews(v); };
-
-  const runOptimisation = useCallback(() => setHasRun(true), []);
 
   // ───── Universe Tab ─────
   const UniversePanel = () => (
@@ -452,8 +530,18 @@ export default function App() {
           <MetricCard label="Information Ratio" value={risk.ir.toFixed(2)} sub="Active return / TE" color="green" />
           <MetricCard label="Expected Loss" value={risk.el.toFixed(1)} unit="bp" sub="PD × LGD weighted" color="red" />
           <MetricCard label="Spread Duration" value={risk.portSpreadDur.toFixed(2)} unit="yr" sub="Portfolio level" color="blue" />
-          <MetricCard label="Credit VaR (99%)" value={risk.creditVaR.toFixed(0)} unit="bp" sub="Parametric 1-year" color="red" />
+          <MetricCard label="Credit VaR (99%)" value={(risk.creditVaR || 0).toFixed(0)} unit="bp" sub={risk.creditCVaR ? `CVaR: ${risk.creditCVaR.toFixed(0)} bp (Monte Carlo)` : "Parametric 1-year"} color="red" />
         </div>
+
+        {/* Solver & warnings */}
+        {(results.solverStatus || backendWarnings.length > 0) && (
+          <div className="flex flex-wrap gap-2 items-center">
+            {results.solverStatus && <span className={`px-2 py-1 rounded-full text-xs font-medium ${results.solverStatus === "optimal" ? "bg-green-100 text-green-700" : results.solverStatus.includes("js") ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>Solver: {results.solverStatus}</span>}
+            {engineMode === "python" && API_URL && <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">Python backend (cvxpy + Monte Carlo)</span>}
+            {engineMode === "browser" && <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Browser engine (JS)</span>}
+            {backendWarnings.map((w, i) => <span key={i} className="px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{w}</span>)}
+          </div>
+        )}
 
         {/* Active Weights Chart */}
         <div className="border border-gray-200 rounded-xl p-4 bg-white">
@@ -560,13 +648,21 @@ export default function App() {
               <p className="text-xs text-gray-500 mt-0.5">Investment Grade Corporate Bond Portfolio</p>
             </div>
             <div className="flex items-center gap-3">
+              {API_URL && (
+                <button onClick={() => setEngineMode(m => m === "python" ? "browser" : "python")}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${engineMode === "python" ? "border-green-300 bg-green-50 text-green-700" : "border-gray-300 bg-gray-50 text-gray-600"}`}>
+                  {engineMode === "python" ? <Server size={13} /> : <Cpu size={13} />}
+                  {engineMode === "python" ? "Python (cvxpy)" : "Browser (JS)"}
+                </button>
+              )}
               <button onClick={() => setShowParams(!showParams)}
                 className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
                 <Settings size={15} />{showParams ? "Hide" : "Parameters"}{showParams ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </button>
-              <button onClick={() => { setHasRun(false); setTimeout(runOptimisation, 50); }}
-                className="flex items-center gap-1.5 px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 shadow-md transition-all active:scale-95">
-                <Play size={15} /> Run Optimisation
+              <button onClick={runOptimisation} disabled={loading}
+                className="flex items-center gap-1.5 px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 shadow-md transition-all active:scale-95 disabled:opacity-60">
+                {loading ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
+                {loading ? "Running..." : "Run Optimisation"}
               </button>
             </div>
           </div>

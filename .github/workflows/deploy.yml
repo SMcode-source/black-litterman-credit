@@ -25,6 +25,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          VITE_API_URL: https://bl-credit-api-gjgmagcwg5b0bmam.canadacentral-01.azurewebsites.net
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
