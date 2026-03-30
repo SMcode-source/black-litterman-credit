@@ -1,12 +1,13 @@
 import { useState, useMemo, useCallback } from "react";
-import * as math from "mathjs";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell, Legend, ScatterChart, Scatter, ZAxis,
-  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   LineChart, Line, ReferenceLine
 } from "recharts";
 import { Settings, TrendingUp, Eye, BarChart3, AlertTriangle, Play, Plus, Trash2, Info, ChevronDown, ChevronUp, RefreshCw, Server, Cpu, Loader2, Upload, FileSpreadsheet, X, RotateCcw } from "lucide-react";
+
+import { SAMPLE_BONDS, SECTORS, RATING_ORDER, COLORS, SECTOR_COLORS } from "./constants";
+import { generateCovarianceMatrix, computeEquilibrium, buildViewMatrices, computePosterior, optimisePortfolio, computeRiskMetrics } from "./engine";
 
 // ═══════════════════════════════════════════════════════════════════
 // API CONFIGURATION
@@ -42,209 +43,8 @@ async function callBackendOptimise(bonds, views, params) {
   return res.json();
 }
 
-
 // ═══════════════════════════════════════════════════════════════════
-// SAMPLE IG BOND UNIVERSE
-// ═══════════════════════════════════════════════════════════════════
-const SAMPLE_BONDS = [
-  { id: "AAPL", issuer: "Apple Inc.", sector: "Technology", rating: "AA+", oas: 45, spreadDur: 4.2, pd: 0.0003, lgd: 0.4, mktValue: 5200, matBucket: "3-5y" },
-  { id: "MSFT", issuer: "Microsoft Corp.", sector: "Technology", rating: "AAA", oas: 35, spreadDur: 5.1, pd: 0.0001, lgd: 0.4, mktValue: 6100, matBucket: "5-7y" },
-  { id: "JPM", issuer: "JPMorgan Chase", sector: "Financials", rating: "A+", oas: 72, spreadDur: 3.8, pd: 0.0008, lgd: 0.45, mktValue: 4800, matBucket: "3-5y" },
-  { id: "BAC", issuer: "Bank of America", sector: "Financials", rating: "A", oas: 85, spreadDur: 4.5, pd: 0.0012, lgd: 0.45, mktValue: 4200, matBucket: "3-5y" },
-  { id: "GS", issuer: "Goldman Sachs", sector: "Financials", rating: "A+", oas: 78, spreadDur: 3.2, pd: 0.0010, lgd: 0.45, mktValue: 3100, matBucket: "3-5y" },
-  { id: "JNJ", issuer: "Johnson & Johnson", sector: "Healthcare", rating: "AAA", oas: 32, spreadDur: 6.0, pd: 0.0001, lgd: 0.4, mktValue: 4500, matBucket: "5-7y" },
-  { id: "PFE", issuer: "Pfizer Inc.", sector: "Healthcare", rating: "A+", oas: 62, spreadDur: 4.8, pd: 0.0006, lgd: 0.4, mktValue: 3200, matBucket: "5-7y" },
-  { id: "UNH", issuer: "UnitedHealth Group", sector: "Healthcare", rating: "A+", oas: 68, spreadDur: 5.5, pd: 0.0007, lgd: 0.4, mktValue: 3800, matBucket: "5-7y" },
-  { id: "XOM", issuer: "Exxon Mobil", sector: "Energy", rating: "AA-", oas: 55, spreadDur: 4.0, pd: 0.0005, lgd: 0.4, mktValue: 3600, matBucket: "3-5y" },
-  { id: "CVX", issuer: "Chevron Corp.", sector: "Energy", rating: "AA-", oas: 52, spreadDur: 3.5, pd: 0.0004, lgd: 0.4, mktValue: 3000, matBucket: "3-5y" },
-  { id: "PG", issuer: "Procter & Gamble", sector: "Consumer Staples", rating: "AA-", oas: 40, spreadDur: 5.2, pd: 0.0002, lgd: 0.4, mktValue: 3900, matBucket: "5-7y" },
-  { id: "KO", issuer: "Coca-Cola Co.", sector: "Consumer Staples", rating: "A+", oas: 48, spreadDur: 4.6, pd: 0.0004, lgd: 0.4, mktValue: 3400, matBucket: "3-5y" },
-  { id: "T", issuer: "AT&T Inc.", sector: "Communications", rating: "BBB", oas: 125, spreadDur: 6.8, pd: 0.0035, lgd: 0.45, mktValue: 4100, matBucket: "7-10y" },
-  { id: "VZ", issuer: "Verizon Comms.", sector: "Communications", rating: "BBB+", oas: 105, spreadDur: 6.2, pd: 0.0025, lgd: 0.45, mktValue: 3700, matBucket: "7-10y" },
-  { id: "NEE", issuer: "NextEra Energy", sector: "Utilities", rating: "A-", oas: 70, spreadDur: 5.0, pd: 0.0009, lgd: 0.4, mktValue: 2800, matBucket: "5-7y" },
-  { id: "D", issuer: "Dominion Energy", sector: "Utilities", rating: "BBB+", oas: 95, spreadDur: 5.8, pd: 0.0020, lgd: 0.4, mktValue: 2400, matBucket: "5-7y" },
-  { id: "CAT", issuer: "Caterpillar Inc.", sector: "Industrials", rating: "A", oas: 58, spreadDur: 3.6, pd: 0.0007, lgd: 0.4, mktValue: 2600, matBucket: "3-5y" },
-  { id: "HON", issuer: "Honeywell Int'l", sector: "Industrials", rating: "A", oas: 55, spreadDur: 4.1, pd: 0.0006, lgd: 0.4, mktValue: 2900, matBucket: "3-5y" },
-  { id: "UNP", issuer: "Union Pacific", sector: "Industrials", rating: "A-", oas: 65, spreadDur: 5.3, pd: 0.0008, lgd: 0.4, mktValue: 2500, matBucket: "5-7y" },
-  { id: "BLK", issuer: "BlackRock Inc.", sector: "Financials", rating: "A+", oas: 68, spreadDur: 3.9, pd: 0.0007, lgd: 0.45, mktValue: 2200, matBucket: "3-5y" },
-  { id: "AMZN", issuer: "Amazon.com", sector: "Technology", rating: "AA", oas: 42, spreadDur: 4.7, pd: 0.0002, lgd: 0.4, mktValue: 4600, matBucket: "5-7y" },
-  { id: "META", issuer: "Meta Platforms", sector: "Technology", rating: "AA-", oas: 50, spreadDur: 3.4, pd: 0.0003, lgd: 0.4, mktValue: 3300, matBucket: "3-5y" },
-  { id: "BMY", issuer: "Bristol-Myers Squibb", sector: "Healthcare", rating: "A", oas: 75, spreadDur: 5.6, pd: 0.0010, lgd: 0.4, mktValue: 2700, matBucket: "5-7y" },
-  { id: "F", issuer: "Ford Motor Co.", sector: "Consumer Disc.", rating: "BBB-", oas: 155, spreadDur: 4.2, pd: 0.0055, lgd: 0.5, mktValue: 2100, matBucket: "3-5y" },
-  { id: "GM", issuer: "General Motors", sector: "Consumer Disc.", rating: "BBB", oas: 135, spreadDur: 3.8, pd: 0.0040, lgd: 0.5, mktValue: 2300, matBucket: "3-5y" },
-];
-
-const SECTORS = [...new Set(SAMPLE_BONDS.map(b => b.sector))];
-const RATING_ORDER = ["AAA", "AA+", "AA", "AA-", "A+", "A", "A-", "BBB+", "BBB", "BBB-"];
-const COLORS = ["#1e40af", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd", "#059669", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16"];
-const SECTOR_COLORS = { Technology: "#3b82f6", Financials: "#10b981", Healthcare: "#8b5cf6", Energy: "#f59e0b", "Consumer Staples": "#ec4899", Communications: "#ef4444", Utilities: "#14b8a6", Industrials: "#f97316", "Consumer Disc.": "#6366f1" };
-
-// ═══════════════════════════════════════════════════════════════════
-// MATRIX UTILITIES
-// ═══════════════════════════════════════════════════════════════════
-function generateCovarianceMatrix(bonds) {
-  const n = bonds.length;
-  const sectorMap = {};
-  SECTORS.forEach((s, i) => sectorMap[s] = i);
-  const cov = math.zeros(n, n)._data;
-
-  for (let i = 0; i < n; i++) {
-    for (let j = i; j < n; j++) {
-      const bi = bonds[i], bj = bonds[j];
-      const volI = (bi.oas / 10000) * bi.spreadDur * 0.3;
-      const volJ = (bj.oas / 10000) * bj.spreadDur * 0.3;
-      let corr = 0.15;
-      if (bi.sector === bj.sector) corr = 0.55;
-      const ratingDist = Math.abs(RATING_ORDER.indexOf(bi.rating) - RATING_ORDER.indexOf(bj.rating));
-      corr += Math.max(0, 0.15 - ratingDist * 0.03);
-      if (i === j) corr = 1.0;
-      corr = Math.min(corr, 0.95);
-      cov[i][j] = volI * volJ * corr;
-      cov[j][i] = cov[i][j];
-    }
-  }
-  return cov;
-}
-
-function matInverse(m) {
-  try { return math.inv(m); }
-  catch { const n = m.length; const reg = m.map((row, i) => row.map((v, j) => v + (i === j ? 1e-6 : 0))); return math.inv(reg); }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// BLACK-LITTERMAN ENGINE
-// ═══════════════════════════════════════════════════════════════════
-function computeEquilibrium(bonds, covMatrix, delta) {
-  const totalMV = bonds.reduce((s, b) => s + b.mktValue, 0);
-  const wMkt = bonds.map(b => b.mktValue / totalMV);
-  const pi = math.multiply(math.multiply(delta, covMatrix), wMkt);
-  return { wMkt, pi };
-}
-
-function buildViewMatrices(views, bonds, covMatrix, tau) {
-  if (!views.length) return null;
-  const n = bonds.length;
-  const k = views.length;
-  const P = math.zeros(k, n)._data;
-  const Q = [];
-
-  views.forEach((v, vi) => {
-    Q.push(v.magnitude / 10000);
-    if (v.type === "ABSOLUTE") {
-      const idx = bonds.findIndex(b => b.id === v.longAssets[0]);
-      if (idx >= 0) P[vi][idx] = 1;
-    } else {
-      const longs = v.longAssets.filter(a => bonds.some(b => b.id === a));
-      const shorts = v.shortAssets.filter(a => bonds.some(b => b.id === a));
-      longs.forEach(a => { const idx = bonds.findIndex(b => b.id === a); if (idx >= 0) P[vi][idx] = 1 / longs.length; });
-      shorts.forEach(a => { const idx = bonds.findIndex(b => b.id === a); if (idx >= 0) P[vi][idx] = -1 / shorts.length; });
-    }
-  });
-
-  const omega = math.zeros(k, k)._data;
-  for (let i = 0; i < k; i++) {
-    const pRow = P[i];
-    const pSigPt = math.multiply(math.multiply(pRow, covMatrix), pRow);
-    const conf = views[i].confidence || 0.5;
-    omega[i][i] = tau * pSigPt * (1 / conf - 1);
-    if (omega[i][i] < 1e-12) omega[i][i] = 1e-12;
-  }
-  return { P, Q, omega };
-}
-
-function computePosterior(pi, covMatrix, tau, viewData) {
-  const n = pi.length;
-  const tauSigma = math.multiply(tau, covMatrix);
-  const tauSigmaInv = matInverse(tauSigma);
-
-  if (!viewData) {
-    return { muBL: Array.from(pi), sigmaBL: math.add(covMatrix, tauSigma) };
-  }
-
-  const { P, Q, omega } = viewData;
-  const omegaInv = matInverse(omega);
-  const Pt = math.transpose(P);
-  const PtOmegaInvP = math.multiply(math.multiply(Pt, omegaInv), P);
-  const posteriorPrecision = math.add(tauSigmaInv, PtOmegaInvP);
-  const posteriorCov = matInverse(posteriorPrecision);
-  const term1 = math.multiply(tauSigmaInv, pi);
-  const term2 = math.multiply(math.multiply(Pt, omegaInv), Q);
-  const muBL = math.multiply(posteriorCov, math.add(term1, term2));
-  const sigmaBL = math.add(covMatrix, posteriorCov);
-
-  return { muBL: Array.isArray(muBL) ? muBL : muBL._data || [muBL], sigmaBL };
-}
-
-function optimisePortfolio(muBL, sigmaBL, delta, bonds, constraints) {
-  const n = bonds.length;
-  let w = muBL.map(() => 1 / n);
-
-  // Gradient ascent with projection for: max w'μ - (δ/2) w'Σw
-  const lr = 0.0005;
-  const maxIter = 5000;
-
-  for (let iter = 0; iter < maxIter; iter++) {
-    const sigW = math.multiply(sigmaBL, w);
-    const grad = math.subtract(muBL, math.multiply(delta, sigW));
-
-    w = w.map((wi, i) => wi + lr * grad[i]);
-
-    // Project: long-only, sum=1, max issuer weight
-    const maxW = (constraints.maxIssuerWeight || 5) / 100;
-    const minW = (constraints.minPositionSize || 0) / 100;
-    w = w.map(wi => Math.max(minW, Math.min(maxW, wi)));
-    const sum = w.reduce((a, b) => a + b, 0);
-    w = w.map(wi => wi / sum);
-  }
-
-  return w;
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// RISK ANALYTICS
-// ═══════════════════════════════════════════════════════════════════
-function computeRiskMetrics(w, bonds, covMatrix, muBL) {
-  const portReturn = math.dot(w, muBL) * 10000;
-  const portVar = math.multiply(math.multiply(w, covMatrix), w);
-  const portVol = Math.sqrt(portVar) * 10000;
-  const sharpe = portVol > 0 ? portReturn / portVol : 0;
-
-  const totalMV = bonds.reduce((s, b) => s + b.mktValue, 0);
-  const wBmk = bonds.map(b => b.mktValue / totalMV);
-  const activeW = w.map((wi, i) => wi - wBmk[i]);
-  const te = Math.sqrt(math.multiply(math.multiply(activeW, covMatrix), activeW)) * 10000;
-  const ir = te > 0 ? (portReturn - math.dot(wBmk, muBL) * 10000) / te : 0;
-
-  const el = math.dot(w, bonds.map(b => b.pd * b.lgd)) * 10000;
-  const dts = math.dot(w, bonds.map(b => (b.oas / 10000) * b.spreadDur)) * 10000;
-  const portSpreadDur = math.dot(w, bonds.map(b => b.spreadDur));
-
-  // Sector decomposition
-  const sectorWeights = {};
-  const sectorBmkWeights = {};
-  bonds.forEach((b, i) => {
-    sectorWeights[b.sector] = (sectorWeights[b.sector] || 0) + w[i];
-    sectorBmkWeights[b.sector] = (sectorBmkWeights[b.sector] || 0) + wBmk[i];
-  });
-
-  // Rating decomposition
-  const ratingWeights = {};
-  const ratingBmkWeights = {};
-  bonds.forEach((b, i) => {
-    const bucket = b.rating.startsWith("AAA") ? "AAA" : b.rating.startsWith("AA") ? "AA" : b.rating.startsWith("A") ? "A" : "BBB";
-    ratingWeights[bucket] = (ratingWeights[bucket] || 0) + w[i];
-    ratingBmkWeights[bucket] = (ratingBmkWeights[bucket] || 0) + wBmk[i];
-  });
-
-  // Credit VaR (parametric approximation)
-  const z99 = 2.326;
-  const creditVaR = (portReturn - z99 * portVol);
-
-  return { portReturn, portVol, sharpe, te, ir, el, dts, portSpreadDur, sectorWeights, sectorBmkWeights, ratingWeights, ratingBmkWeights, creditVaR, activeW, wBmk };
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// UI COMPONENTS
+// SMALL UI COMPONENTS
 // ═══════════════════════════════════════════════════════════════════
 const Tab = ({ label, active, onClick, icon: Icon }) => (
   <button onClick={onClick}
@@ -267,13 +67,6 @@ const MetricCard = ({ label, value, unit, sub, color = "blue" }) => {
   );
 };
 
-const Tooltip2 = ({ text, children }) => (
-  <div className="group relative inline-flex items-center">
-    {children}
-    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">{text}</div>
-  </div>
-);
-
 // ═══════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════
@@ -291,7 +84,7 @@ export default function App() {
   const [engineMode, setEngineMode] = useState(API_URL ? "python" : "browser");
   const [backendWarnings, setBackendWarnings] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [uploadMode, setUploadMode] = useState("replace"); // "replace" or "append"
+  const [uploadMode, setUploadMode] = useState("replace");
   const [uploadResult, setUploadResult] = useState(null);
 
   const covMatrix = useMemo(() => generateCovarianceMatrix(bonds), [bonds]);
@@ -311,7 +104,6 @@ export default function App() {
     try {
       if (engineMode === "python" && API_URL) {
         const apiResult = await callBackendOptimise(bonds, views, params);
-        // Transform API response to match frontend format
         const totalMV = bonds.reduce((s, b) => s + b.mktValue, 0);
         const wMkt = bonds.map(b => b.mktValue / totalMV);
         const w = apiResult.issuer_results.map(r => r.optimal_weight / 100);
@@ -382,13 +174,13 @@ export default function App() {
           }
           setBonds(prev => [...prev, ...unique]);
         }
-        setResults(null); // clear stale results
+        setResults(null);
       }
     } catch (err) {
       setUploadResult({ status: "error", bonds: [], row_count: 0, warnings: [], errors: [err.message] });
     }
     setUploading(false);
-    e.target.value = ""; // reset file input
+    e.target.value = "";
   }, [uploadMode, bonds]);
 
   const resetToSampleBonds = useCallback(() => {
@@ -415,7 +207,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── File Upload Section ── */}
+      {/* File Upload Section */}
       {API_URL && (
         <div className="mb-4 border border-dashed border-gray-300 rounded-xl p-4 bg-gray-50/50">
           <div className="flex items-center justify-between mb-3">
@@ -522,8 +314,8 @@ export default function App() {
                   <td className="px-3 py-2 text-right font-mono">{b.oas}</td>
                   <td className="px-3 py-2 text-right font-mono">{b.spreadDur.toFixed(1)}</td>
                   <td className="px-3 py-2 text-right font-mono">{(b.pd * 10000).toFixed(1)}</td>
-                  {bonds.some(x => x.ytm != null) && <td className="px-3 py-2 text-right font-mono">{b.ytm != null ? b.ytm.toFixed(2) : "—"}</td>}
-                  {bonds.some(x => x.couponRate != null) && <td className="px-3 py-2 text-right font-mono">{b.couponRate != null ? b.couponRate.toFixed(2) : "—"}</td>}
+                  {bonds.some(x => x.ytm != null) && <td className="px-3 py-2 text-right font-mono">{b.ytm != null ? b.ytm.toFixed(2) : "\u2014"}</td>}
+                  {bonds.some(x => x.couponRate != null) && <td className="px-3 py-2 text-right font-mono">{b.couponRate != null ? b.couponRate.toFixed(2) : "\u2014"}</td>}
                   <td className="px-3 py-2 text-right font-mono">{bmkW.toFixed(2)}</td>
                   {results && <td className="px-3 py-2 text-right font-mono font-semibold text-blue-700">{optW.toFixed(2)}</td>}
                   {results && <td className={`px-3 py-2 text-right font-mono font-semibold ${active > 0.01 ? "text-green-600" : active < -0.01 ? "text-red-500" : "text-gray-400"}`}>{active > 0 ? "+" : ""}{active.toFixed(2)}</td>}
@@ -627,7 +419,6 @@ export default function App() {
 
     const { w, risk, muBL, pi, wMkt } = results;
 
-    // Chart data
     const weightData = bonds.map((b, i) => ({
       name: b.id, optimal: +(w[i] * 100).toFixed(2), benchmark: +(wMkt[i] * 100).toFixed(2), active: +((w[i] - wMkt[i]) * 100).toFixed(2)
     })).sort((a, b) => b.active - a.active);
@@ -659,7 +450,7 @@ export default function App() {
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <MetricCard label="Information Ratio" value={risk.ir.toFixed(2)} sub="Active return / TE" color="green" />
-          <MetricCard label="Expected Loss" value={risk.el.toFixed(1)} unit="bp" sub="PD × LGD weighted" color="red" />
+          <MetricCard label="Expected Loss" value={risk.el.toFixed(1)} unit="bp" sub="PD x LGD weighted" color="red" />
           <MetricCard label="Spread Duration" value={risk.portSpreadDur.toFixed(2)} unit="yr" sub="Portfolio level" color="blue" />
           <MetricCard label="Credit VaR (99%)" value={(risk.creditVaR || 0).toFixed(0)} unit="bp" sub={risk.creditCVaR ? `CVaR: ${risk.creditCVaR.toFixed(0)} bp (Monte Carlo)` : "Parametric 1-year"} color="red" />
         </div>
@@ -735,8 +526,8 @@ export default function App() {
               <YAxis dataKey="name" type="category" fontSize={11} width={45} />
               <Tooltip />
               <Legend fontSize={11} />
-              <Bar dataKey="equilibrium" fill="#cbd5e1" name="Equilibrium (π)" radius={[0, 2, 2, 0]} />
-              <Bar dataKey="posterior" fill="#3b82f6" name="Posterior (μ_BL)" radius={[0, 2, 2, 0]} />
+              <Bar dataKey="equilibrium" fill="#cbd5e1" name="Equilibrium" radius={[0, 2, 2, 0]} />
+              <Bar dataKey="posterior" fill="#3b82f6" name="Posterior" radius={[0, 2, 2, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -802,12 +593,12 @@ export default function App() {
           {showParams && (
             <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200 grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Risk Aversion (δ)</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Risk Aversion (delta)</label>
                 <input type="number" step="0.1" value={params.delta} onChange={e => setParams({ ...params, delta: +e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Prior Uncertainty (τ)</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Prior Uncertainty (tau)</label>
                 <input type="number" step="0.005" value={params.tau} onChange={e => setParams({ ...params, tau: +e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
               </div>
@@ -846,7 +637,7 @@ export default function App() {
 
       {/* Footer */}
       <div className="text-center py-4 text-xs text-gray-400">
-        Black-Litterman Credit Optimiser v1.0 &middot; Implements Bayesian posterior blending with credit-specific risk framework
+        Black-Litterman Credit Optimiser v1.0 &middot; Bayesian posterior blending with credit-specific risk framework
       </div>
     </div>
   );

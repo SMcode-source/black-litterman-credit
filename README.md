@@ -1,16 +1,65 @@
-# React + Vite
+# Black-Litterman Credit Optimiser
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+An interactive portfolio optimisation tool for investment-grade corporate bonds using the Black-Litterman framework with credit-specific risk analytics.
 
-Currently, two official plugins are available:
+## Architecture
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+**Frontend** (React + Vite) — single-page app with a built-in JavaScript fallback engine and interactive charts (Recharts).
 
-## React Compiler
+**Backend** (FastAPI + Python) — full optimisation engine using cvxpy, scipy, and Monte Carlo credit VaR simulation.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Service | URL | Platform |
+|---------|-----|----------|
+| Frontend | https://black-litterman-credit.onrender.com | Render Static Site |
+| Backend API | https://bl-credit-api.onrender.com | Render Web Service |
 
-## Expanding the ESLint configuration
+## Features
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- Black-Litterman posterior return blending with absolute and relative views
+- Constrained portfolio optimisation (issuer limits, position sizing, tracking error)
+- Credit risk metrics: expected loss, spread duration, DTS, Credit VaR/CVaR (Monte Carlo)
+- Sector and rating allocation analysis with interactive charts
+- File upload (CSV, TXT, Excel) with automatic YTM calculation and OAS estimation
+- Dual engine mode: Python backend with JS browser fallback
+
+## Project Structure
+
+```
+src/
+  App.jsx          Main React component (UI, state, API integration)
+  constants.js     Sample bond universe and display constants
+  engine.js        Browser-side BL engine (fallback when backend unavailable)
+  main.jsx         Entry point
+  index.css        Tailwind styles
+
+backend/
+  main.py          FastAPI endpoints (optimise, equilibrium, upload-bonds)
+  bl_engine.py     Black-Litterman computation (equilibrium, posterior, optimisation)
+  risk_engine.py   Risk analytics (covariance, expected loss, Monte Carlo VaR)
+  models.py        Pydantic request/response schemas
+  utils.py         Shared utilities (YTM solver, column resolution, rating maps)
+  requirements.txt Python dependencies
+  startup.sh       Gunicorn launch script
+```
+
+## Local Development
+
+```bash
+# Frontend
+npm install
+npm run dev
+
+# Backend
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+Set `VITE_API_URL=http://localhost:8000` in a `.env` file to connect the frontend to a local backend.
+
+## Environment Variables
+
+| Variable | Service | Description |
+|----------|---------|-------------|
+| `VITE_API_URL` | Frontend | Backend API URL (build-time) |
+| `ALLOWED_ORIGINS` | Backend | Comma-separated CORS origins |
