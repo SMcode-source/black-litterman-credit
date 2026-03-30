@@ -1,12 +1,11 @@
 import { useState, useMemo, useCallback } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  PieChart, Pie, Cell, Legend, ScatterChart, Scatter, ZAxis,
-  LineChart, Line, ReferenceLine
+  Cell, Legend, ScatterChart, Scatter, ZAxis, ReferenceLine
 } from "recharts";
-import { Settings, TrendingUp, Eye, BarChart3, AlertTriangle, Play, Plus, Trash2, Info, ChevronDown, ChevronUp, RefreshCw, Server, Cpu, Loader2, Upload, FileSpreadsheet, X, RotateCcw } from "lucide-react";
+import { Settings, Eye, BarChart3, Play, Plus, Trash2, ChevronDown, ChevronUp, Server, Cpu, Loader2, Upload, FileSpreadsheet, X, RotateCcw } from "lucide-react";
 
-import { SAMPLE_BONDS, SECTORS, RATING_ORDER, COLORS, SECTOR_COLORS } from "./constants";
+import { SAMPLE_BONDS, SECTOR_COLORS } from "./constants";
 import { generateCovarianceMatrix, computeEquilibrium, buildViewMatrices, computePosterior, optimisePortfolio, computeRiskMetrics } from "./engine";
 
 // ═══════════════════════════════════════════════════════════════════

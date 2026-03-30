@@ -14,7 +14,6 @@ class BondData(BaseModel):
     lgd: float = Field(default=0.4, description="Loss given default (1 - recovery)")
     mkt_value: float = Field(description="Market value for benchmark weighting")
     maturity_bucket: str = Field(default="3-5y")
-    cds_spread: Optional[float] = Field(default=None, description="CDS spread in bp")
     ytm: Optional[float] = Field(default=None, description="Yield to maturity in %")
     coupon_rate: Optional[float] = Field(default=None, description="Coupon rate in %")
     maturity_date: Optional[str] = Field(default=None, description="Maturity date (YYYY-MM-DD)")
@@ -28,7 +27,6 @@ class ViewInput(BaseModel):
     short_assets: list[str] = []
     magnitude_bp: float = Field(description="Expected outperformance in bp")
     confidence: float = Field(default=0.5, ge=0.01, le=1.0)
-    horizon_months: int = Field(default=12)
 
 
 class Constraints(BaseModel):
@@ -36,9 +34,7 @@ class Constraints(BaseModel):
     min_position_size: float = Field(default=0.2, description="Min position size %")
     max_sector_overweight: float = Field(default=10.0, description="Max sector overweight vs bmk %")
     max_tracking_error: float = Field(default=150.0, description="Max TE in bp annualised")
-    max_turnover: float = Field(default=20.0, description="Max quarterly turnover %")
     spread_duration_tolerance: float = Field(default=0.25, description="SD tolerance vs bmk in years")
-    credit_var_limit: Optional[float] = Field(default=None, description="Max Credit VaR (99%) as % of NAV")
     excluded_issuers: list[str] = Field(default=[])
 
 

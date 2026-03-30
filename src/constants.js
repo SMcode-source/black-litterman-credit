@@ -32,7 +32,6 @@ export const SAMPLE_BONDS = [
 
 export const SECTORS = [...new Set(SAMPLE_BONDS.map(b => b.sector))];
 export const RATING_ORDER = ["AAA", "AA+", "AA", "AA-", "A+", "A", "A-", "BBB+", "BBB", "BBB-"];
-export const COLORS = ["#1e40af", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd", "#059669", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16"];
 export const SECTOR_COLORS = {
   Technology: "#3b82f6", Financials: "#10b981", Healthcare: "#8b5cf6",
   Energy: "#f59e0b", "Consumer Staples": "#ec4899", Communications: "#ef4444",
