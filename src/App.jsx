@@ -1,18 +1,38 @@
+/**
+ * Black-Litterman Credit Optimiser — Main App
+ * =============================================
+ * Single-page React app with three tabs:
+ *   1. Universe  — View/upload the bond universe
+ *   2. Views     — Define manager return views
+ *   3. Results   — Run optimisation and see charts/metrics
+ *
+ * Supports two compute modes:
+ *   - Python backend (cvxpy + Monte Carlo) when API_URL is set
+ *   - Browser JS fallback (gradient projection) otherwise
+ */
 import { useState, useMemo, useCallback } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  Cell, Legend, ScatterChart, Scatter, ZAxis, ReferenceLine
+  Cell, Legend, ScatterChart, Scatter, ZAxis, ReferenceLine,
 } from "recharts";
-import { Settings, Eye, BarChart3, Play, Plus, Trash2, ChevronDown, ChevronUp, Server, Cpu, Loader2, Upload, FileSpreadsheet, X, RotateCcw } from "lucide-react";
+import {
+  Settings, Eye, BarChart3, Play, Plus, Trash2,
+  ChevronDown, ChevronUp, Server, Cpu, Loader2,
+  Upload, FileSpreadsheet, X, RotateCcw,
+} from "lucide-react";
 
 import { SAMPLE_BONDS, SECTOR_COLORS } from "./constants";
-import { generateCovarianceMatrix, computeEquilibrium, buildViewMatrices, computePosterior, optimisePortfolio, computeRiskMetrics } from "./engine";
+import {
+  generateCovarianceMatrix, computeEquilibrium, buildViewMatrices,
+  computePosterior, optimisePortfolio, computeRiskMetrics,
+} from "./engine";
 
-// ═══════════════════════════════════════════════════════════════════
-// API CONFIGURATION
-// ═══════════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------------------
+// Config: set VITE_API_URL at build time to connect to the Python backend
+// ---------------------------------------------------------------------------
 const API_URL = import.meta.env.VITE_API_URL || "";
 
+/** Send bond universe + views to the Python backend for optimisation. */
 async function callBackendOptimise(bonds, views, params) {
   const payload = {
     bonds: bonds.map(b => ({
@@ -42,9 +62,9 @@ async function callBackendOptimise(bonds, views, params) {
   return res.json();
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// SMALL UI COMPONENTS
-// ═══════════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------------------
+// Reusable UI components
+// ---------------------------------------------------------------------------
 const Tab = ({ label, active, onClick, icon: Icon }) => (
   <button onClick={onClick}
     className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg transition-all ${active ? "bg-blue-600 text-white shadow-md" : "text-gray-600 hover:bg-gray-100"}`}>
@@ -66,28 +86,33 @@ const MetricCard = ({ label, value, unit, sub, color = "blue" }) => {
   );
 };
 
-// ═══════════════════════════════════════════════════════════════════
-// MAIN APP
-// ═══════════════════════════════════════════════════════════════════
+// ===========================================================================
+// Main App
+// ===========================================================================
 export default function App() {
-  const [tab, setTab] = useState("universe");
-  const [bonds, setBonds] = useState(SAMPLE_BONDS);
+  // --- State ---
+  const [tab, setTab] = useState("universe");       // active tab
+  const [bonds, setBonds] = useState(SAMPLE_BONDS);  // current bond universe
   const [views, setViews] = useState([
     { type: "RELATIVE", longAssets: ["JPM", "GS"], shortAssets: ["T", "VZ"], magnitude: 30, confidence: 0.6 },
     { type: "ABSOLUTE", longAssets: ["F"], shortAssets: [], magnitude: 80, confidence: 0.4 },
   ]);
-  const [params, setParams] = useState({ delta: 2.5, tau: 0.025, maxIssuerWeight: 8, minPositionSize: 0.2 });
-  const [results, setResults] = useState(null);
-  const [showParams, setShowParams] = useState(false);
+  const [params, setParams] = useState({
+    delta: 2.5, tau: 0.025, maxIssuerWeight: 8, minPositionSize: 0.2,
+  });
+  const [results, setResults] = useState(null);       // optimisation output
+  const [showParams, setShowParams] = useState(false); // parameter panel toggle
   const [loading, setLoading] = useState(false);
   const [engineMode, setEngineMode] = useState(API_URL ? "python" : "browser");
   const [backendWarnings, setBackendWarnings] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [uploadMode, setUploadMode] = useState("replace");
+  const [uploadMode, setUploadMode] = useState("replace"); // "replace" or "append"
   const [uploadResult, setUploadResult] = useState(null);
 
+  // Recompute covariance whenever bond universe changes
   const covMatrix = useMemo(() => generateCovarianceMatrix(bonds), [bonds]);
 
+  // --- Run BL pipeline in the browser (JS fallback) ---
   const runLocalOptimisation = useCallback(() => {
     const { wMkt, pi } = computeEquilibrium(bonds, covMatrix, params.delta);
     const viewData = buildViewMatrices(views, bonds, covMatrix, params.tau);
@@ -97,6 +122,7 @@ export default function App() {
     return { wMkt, pi, muBL, sigmaBL, w, risk, solverStatus: "js_gradient_projection" };
   }, [bonds, covMatrix, views, params]);
 
+  // --- Main "Run" handler: try backend, fall back to browser ---
   const runOptimisation = useCallback(async () => {
     setLoading(true);
     setBackendWarnings([]);
@@ -139,6 +165,7 @@ export default function App() {
     setTab("results");
   }, [bonds, views, params, engineMode, runLocalOptimisation]);
 
+  // --- Upload handler: send file to backend, update bond universe ---
   const handleFileUpload = useCallback(async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -192,7 +219,9 @@ export default function App() {
   const removeView = (i) => setViews(views.filter((_, j) => j !== i));
   const updateView = (i, field, val) => { const v = [...views]; v[i] = { ...v[i], [field]: val }; setViews(v); };
 
-  // ───── Universe Tab ─────
+  // ===========================================================================
+  // Tab: Universe — bond table + file upload
+  // ===========================================================================
   const UniversePanel = () => (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -327,7 +356,9 @@ export default function App() {
     </div>
   );
 
-  // ───── Views Tab ─────
+  // ===========================================================================
+  // Tab: Views — define absolute/relative manager views
+  // ===========================================================================
   const ViewsPanel = () => (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -406,7 +437,9 @@ export default function App() {
     </div>
   );
 
-  // ───── Results Tab ─────
+  // ===========================================================================
+  // Tab: Results — metrics cards + charts
+  // ===========================================================================
   const ResultsPanel = () => {
     if (!results) return (
       <div className="text-center py-20 text-gray-400">
